@@ -1,49 +1,43 @@
 # 🚀 Deployment Guide
 
-Get your 24/7 sustainable URL without any credit card barriers using **Hugging Face Spaces**.
+Choose the best way to host your 24/7 AI outreach engine.
 
 ---
 
-## 🏆 Recommended: Hugging Face Spaces (Truly 0-Card)
-Hugging Face is the most reliable platform to host Docker-based apps for free without ever asking for a credit card.
+## 🏆 Recommended (NO Credit Card): Streamlit Community Cloud
+This is the easiest, truly free way to go live today. No card, no Docker, no hassle.
 
 ### 1. Simple Steps
-1. **GitHub Push**: Ensure your code is on a private GitHub repo.
-2. **Sign Up**: Create an account at [Hugging Face](https://huggingface.co/join).
-3. **New Space**:
-   - Go to [huggingface.co/new-space](https://huggingface.co/new-space).
-   - **Space Name**: e.g., `outreach-agent`.
-   - **Space SDK**: Select **Docker**.
-   - **Docker Template**: Select **Blank**.
-   - **Visibility**: **Private** (Recommended for your safety).
-4. **Connect GitHub**:
-   - Go to the **Settings** tab of your new Space.
-   - Click "Connect a GitHub repository" and select this repo.
-5. **Add Secrets (Environment Variables)**:
-   - Still in **Settings**, scroll to **Variables and secrets**.
-   - Add the following as **Secrets** (not Variables):
-     - `GOOGLE_API_KEY`
-     - `TELEGRAM_BOT_TOKEN`
-     - `MASTER_KEY`
-     - `GOOGLE_CLIENT_JSON` (Paste the whole JSON string)
-6. **Port Verification**: 
-   - Ensure the `README.md` on Hugging Face (the metadata block) has `app_port: 8501`. (The Space will try to use 7860 by default).
+1. **GitHub Push**: Ensure your code is on a private GitHub repository.
+2. **Sign Up**: Go to [share.streamlit.io](https://share.streamlit.io/) and sign in with GitHub.
+3. **Deploy App**:
+   - Repository: `YOUR_REPSITORY_NAME`.
+   - Branch: `master` (or `main`).
+   - Main file path: `src/utils/dashboard.py`.
+4. **Secrets (Crucial!)**:
+   - Click **Advanced Settings** before deploying.
+   - Paste your `.env` variables into the **Secrets** box in TOML format:
+     ```toml
+     GOOGLE_API_KEY = "xxx"
+     TELEGRAM_BOT_TOKEN = "xxx"
+     MASTER_KEY = "xxx"
+     GOOGLE_CLIENT_JSON = '{"type": "service_account", ...}'
+     ```
+5. **Launch!**: Your app, telegram bot, and AI worker will all start together on a permanent `xxx.streamlit.app` URL.
 
 ---
 
-## 🛠️ Performance & Maintenance
-Since Hugging Face's free tier is 24/7 but has limited RAM:
-- **Auto-Restart**: If the app crashes, Hugging Face will restart it automatically.
-- **Persistence**: Note that `data.db` will be reset on restarts. For permanent data, you should use the [Hugging Face Datasets](https://huggingface.co/docs/hub/datasets) or an external database like MongoDB Atlas (Free Tier available).
+## Alternative: Hugging Face Spaces (Truly 0-Card)
+If you prefer Hugging Face, follow the steps in the [HF Guide](./DEPLOYMENT.md#alternative-local-always-on-linux--pm2). Note: Hugging Face uses Docker, so it's a bit more advanced but also 24/7 free.
 
 ---
 
 ## Local "Always On" (Linux / PM2)
-If you prefer to keep everything on your machine:
+If you want to keep everything on your own machine but act like a pro server:
 1. `sudo npm install pm2 -g`
 2. `pm2 start scripts/run_prod.sh --name outreach-agent`
 3. `pm2 save && pm2 startup`
-This ensures if your machine restarts, the bot and dashboard come back up automatically without any credit card.
+This keeps everything running 24/7 on your PC without any external credit card or cloud limits.
 
 ### 2. Data Persistence
 Render's filesystem is ephemeral. To save data between restarts:

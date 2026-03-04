@@ -2,12 +2,32 @@ import streamlit as st
 import pandas as pd
 import sys
 import os
+import threading
+import time
 
 # Ensure the project root is in original path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from src.utils.database import Session, Campaign, EmailLog, GoogleAccount, Draft, ResendAccount
+from src.utils.telegram_bot import main as bot_main
+from src.agent.worker import run_worker
 from sqlalchemy import desc
+
+# --- Background Services Management ---
+# We use threads to run the Bot and AI Worker inside the Streamlit process.
+# This allows "One-Click" deployment on platforms like Streamlit Cloud.
+
+if 'bot_thread' not in st.session_state:
+    print("🤖 Starting Telegram Bot Thread...")
+    thread = threading.Thread(target=bot_main, daemon=True)
+    thread.start()
+    st.session_state['bot_thread'] = True
+
+if 'worker_thread' not in st.session_state:
+    print("🧠 Starting AI Worker Thread...")
+    thread = threading.Thread(target=run_worker, daemon=True)
+    thread.start()
+    st.session_state['worker_thread'] = True
 
 # Page Config
 st.set_page_config(
