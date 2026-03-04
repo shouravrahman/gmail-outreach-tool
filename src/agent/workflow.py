@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Dict, Any
+from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -10,17 +10,17 @@ from src.utils.database import Session, Campaign, EmailLog, GoogleAccount, Draft
 import json
 import time
 import random
+import os
 
 class AgentState(TypedDict):
     campaign_id: int
     account_id: int
     leads: List[Dict[str, Any]]
     drafts: List[Dict[str, Any]]
+    current_lead_index: int
     approved: bool
     status: str
     errors: List[str]
-
-import os
 
 def get_llm(provider="gemini"):
     if provider == "gemini":
@@ -44,23 +44,25 @@ def initialize_node(state: AgentState):
     
     # Get the correct tool for the provider
     leads = []
-    if campaign.outreach_provider == 'gmail':
-        account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
-        tool = GoogleTool(account.credentials)
-        sheet_id = campaign.sheet_url.split("/d/")[1].split("/")[0]
-        leads = tool.read_sheet(sheet_id, "A:Z")
-    else:
-        # For Resend, we still need a sheet to get leads
-        # Typically we assume a Google Sheet even for Resend, or we'd need another lead source
-        # Let's assume Google Sheets is the lead source for now
-        account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
-        if account:
+    try:
+        if campaign.outreach_provider == 'gmail':
+            account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
             tool = GoogleTool(account.credentials)
             sheet_id = campaign.sheet_url.split("/d/")[1].split("/")[0]
             leads = tool.read_sheet(sheet_id, "A:Z")
+        else:
+            # Assume Google Sheets as lead source even for Resend
+            account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
+            if account:
+                tool = GoogleTool(account.credentials)
+                sheet_id = campaign.sheet_url.split("/d/")[1].split("/")[0]
+                leads = tool.read_sheet(sheet_id, "A:Z")
+    except Exception as e:
+        session.close()
+        return {"status": "error", "errors": [f"Sheet error: {str(e)}"]}
     
     session.close()
-    return {"leads": leads, "status": "drafting"}
+    return {"leads": leads, "status": "drafting", "current_lead_index": 0}
 
 def draft_messages_node(state: AgentState):
     session = Session()
@@ -68,8 +70,17 @@ def draft_messages_node(state: AgentState):
     llm = get_llm(campaign.provider)
     prompt_template = campaign.prompt_template
     
+    batch_size = 5 # Small batch size for top-notch rate stability
+    start_idx = state.get("current_lead_index", 0)
+    end_idx = start_idx + batch_size
+    leads_to_process = state["leads"][start_idx:end_idx]
+    
+    if not leads_to_process:
+        session.close()
+        return {"status": "awaiting_approval"}
+
     new_drafts = []
-    for lead in state["leads"]:
+    for lead in leads_to_process:
         recipient_email = lead.get("Email") or lead.get("email")
         if not recipient_email:
             continue
@@ -81,11 +92,28 @@ def draft_messages_node(state: AgentState):
             
         lead_str = json.dumps(lead)
         prompt = f"Using this lead data: {lead_str}\n\nDraft a personalized email based on this instruction: {prompt_template}"
-        response = llm.invoke([
-            SystemMessage(content="You are an expert outreach copywriter. Return ONLY the JSON with 'subject' and 'body' keys."),
-            HumanMessage(content=prompt)
-        ])
         
+        # Rate Limit Aware Invocation
+        retries = 3
+        while retries > 0:
+            try:
+                response = llm.invoke([
+                    SystemMessage(content="You are an expert outreach copywriter. Return ONLY the JSON with 'subject' and 'body' keys."),
+                    HumanMessage(content=prompt)
+                ])
+                break
+            except Exception as e:
+                if "429" in str(e) or "rate_limit" in str(e).lower():
+                    print(f"⚠️ Rate limit hit. Backing off... ({retries} retries left)")
+                    time.sleep(30 * (4 - retries))
+                    retries -= 1
+                else:
+                    raise e
+        
+        if retries == 0:
+            print(f"❌ Failed to draft for {recipient_email} after retries.")
+            continue
+
         try:
             content = json.loads(response.content)
             subj = content['subject']
@@ -107,13 +135,31 @@ def draft_messages_node(state: AgentState):
             
     session.commit()
     session.close()
-    return {"drafts": new_drafts, "status": "awaiting_approval"}
+    
+    new_index = end_idx
+    if new_index >= len(state["leads"]):
+        return {"drafts": new_drafts, "status": "awaiting_approval", "current_lead_index": new_index}
+    else:
+        return {"drafts": state["drafts"] + new_drafts, "status": "drafting_pause", "current_lead_index": new_index}
+
+def wait_node(state: AgentState):
+    session = Session()
+    campaign = session.query(Campaign).filter(Campaign.id == state["campaign_id"]).first()
+    delay = campaign.settings.get("delay_seconds", 60)
+    jitter = random.randint(-5, 5)
+    time.sleep(max(1, delay + jitter))
+    session.close()
+    return state
+
+def wait_draft_node(state: AgentState):
+    # Short pause between drafting batches to respect API limits
+    time.sleep(random.randint(5, 15))
+    return state
 
 def send_emails_node(state: AgentState):
     session = Session()
     campaign = session.query(Campaign).filter(Campaign.id == state["campaign_id"]).first()
     
-    # Get the next "approved" or "edited" draft
     draft = session.query(Draft).filter(Draft.campaign_id == campaign.id, Draft.status.in_(['approved', 'edited'])).first()
     
     if not draft:
@@ -121,19 +167,23 @@ def send_emails_node(state: AgentState):
         return {"status": "completed"}
         
     success = False
-    if campaign.outreach_provider == 'gmail':
-        account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
-        if account:
-            tool = GoogleTool(account.credentials)
-            success = tool.send_email(draft.recipient_email, draft.subject, draft.body)
-    elif campaign.outreach_provider == 'resend':
-        account = session.query(ResendAccount).filter(ResendAccount.id == campaign.outreach_account_id).first()
-        api_key = account.api_key if account else os.getenv("RESEND_API_KEY")
-        from_email = account.from_email if account else os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
-        
-        if api_key:
-            tool = ResendTool(api_key)
-            success = tool.send_email(from_email, draft.recipient_email, draft.subject, draft.body)
+    try:
+        if campaign.outreach_provider == 'gmail':
+            account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
+            if account:
+                tool = GoogleTool(account.credentials)
+                success = tool.send_email(draft.recipient_email, draft.subject, draft.body)
+        elif campaign.outreach_provider == 'resend':
+            account = session.query(ResendAccount).filter(ResendAccount.id == campaign.outreach_account_id).first()
+            api_key = account.api_key if account else os.getenv("RESEND_API_KEY")
+            from_email = account.from_email if account else os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+            
+            if api_key:
+                tool = ResendTool(api_key)
+                success = tool.send_email(from_email, draft.recipient_email, draft.subject, draft.body)
+    except Exception as e:
+        print(f"❌ Send error: {e}")
+        success = False
         
     if success:
         log = EmailLog(
@@ -151,30 +201,29 @@ def send_emails_node(state: AgentState):
     
     session.commit()
     session.close()
-    
-    # We return "sending" to trigger the loop in the graph
     return {"status": "sending"}
-
-def wait_node(state: AgentState):
-    session = Session()
-    campaign = session.query(Campaign).filter(Campaign.id == state["campaign_id"]).first()
-    # Simple delay to respect rate limits / human simulation
-    delay = campaign.settings.get("delay_seconds", 60)
-    jitter = random.randint(-10, 10)
-    time.sleep(max(1, delay + jitter))
-    session.close()
-    return state
 
 def create_workflow():
     workflow = StateGraph(AgentState)
     workflow.add_node("initialize", initialize_node)
     workflow.add_node("draft", draft_messages_node)
+    workflow.add_node("wait_draft", wait_draft_node)
     workflow.add_node("wait", wait_node)
     workflow.add_node("send", send_emails_node)
     
     workflow.set_entry_point("initialize")
     workflow.add_edge("initialize", "draft")
-    workflow.add_edge("draft", END) # Hold for UI/Telegram approval
+    
+    workflow.add_conditional_edges(
+        "draft",
+        lambda x: x["status"],
+        {
+            "drafting_pause": "wait_draft",
+            "awaiting_approval": END,
+            "error": END
+        }
+    )
+    workflow.add_edge("wait_draft", "draft")
     
     workflow.add_conditional_edges(
         "send",
@@ -184,6 +233,6 @@ def create_workflow():
             "completed": END
         }
     )
-    workflow.add_edge("wait", "send") # Loop back to send next
+    workflow.add_edge("wait", "send")
     
     return workflow.compile()

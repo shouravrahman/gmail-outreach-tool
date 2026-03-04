@@ -1,3 +1,13 @@
+---
+title: Outreach Agent
+emoji: 🚀
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 8501
+pinned: false
+---
+
 # AI Outreach Agent 🚀
 
 A sophisticated, Telegram-controlled AI agent for personalized email outreach. It automates lead processing from Google Sheets and sends emails via Gmail or Resend using LangGraph for stateful workflows.
@@ -6,19 +16,19 @@ A sophisticated, Telegram-controlled AI agent for personalized email outreach. I
 - **Telegram Interface**: Command your agent, connect accounts, and approve drafts from your phone.
 - **Multi-Model AI**: Support for **Gemini**, **OpenAI**, and **Ollama (Local)**.
 - **Human-in-the-Loop**: Preview and approve every AI-generated draft before it's sent.
-- **Flexible Hosting**: Run 24/7 on **Render.com** or locally on your own hardware.
+- **Flexible Hosting**: Run 24/7 on **Hugging Face Spaces** or locally on your own hardware.
 
 ---
 
 ## 🚀 Deployment Options
 
-### 1. Cloud (Render.com)
-Deploy in minutes with one-click Blueprint support. Ideal for 24/7 availability.
-- See [DEPLOYMENT.md](./DEPLOYMENT.md#option-a-cloud-deployment-rendercom---recommended) for steps.
+### 1. Cloud (Hugging Face Spaces) - 0-Card Required
+Deploy 24/7 for free without a credit card.
+- See [DEPLOYMENT.md](./DEPLOYMENT.md#-recommended-hugging-face-spaces-truly-0-card) for steps.
 
-### 2. Local (Ollama + Tunnels)
-Run 100% private and 0-cost using local AI models and Cloudflare Tunnels.
-- See [DEPLOYMENT.md](./DEPLOYMENT.md#option-b-local-sovereign-hosting-0-budget) for steps.
+### 2. Local (Sovereign Hosting)
+Run 100% private using local AI and your own hardware.
+- See [DEPLOYMENT.md](./DEPLOYMENT.md#local-always-on-linux--pm2) for steps.
 
 ---
 

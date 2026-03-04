@@ -89,6 +89,11 @@ st.markdown("""
 
 st.title("🚀 Bulk Email AI Agent")
 
+# Hidden Health Check for Cloud Deployment
+if "health_check" in st.query_params:
+    st.write("OK")
+    st.stop()
+
 # Sidebar for stats
 with st.sidebar:
     st.image("https://img.icons8.com/isometric/512/rocket.png", width=80)

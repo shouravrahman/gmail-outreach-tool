@@ -1,19 +1,49 @@
 # 🚀 Deployment Guide
 
-Choose your deployment strategy: **Cloud (Render.com)** for 24/7 reliability, or **Local (Sovereign)** for 0-cost and maximum privacy.
+Get your 24/7 sustainable URL without any credit card barriers using **Hugging Face Spaces**.
 
 ---
 
-## Option A: Cloud Deployment (Render.com) - *Recommended*
-Best for 24/7 availability without needing your PC to be on.
+## 🏆 Recommended: Hugging Face Spaces (Truly 0-Card)
+Hugging Face is the most reliable platform to host Docker-based apps for free without ever asking for a credit card.
 
-### 1. Deployment Steps (Render Blueprint)
-Use the included `render.yaml` for a one-click setup:
-1. **Push Code**: Push this repository to a private GitHub repo.
-2. **New Blueprint**: In Render, click **New > Blueprint**.
-3. **Connect Repo**: Select your repository.
-4. **Environment Variables**: Fill in `TELEGRAM_BOT_TOKEN`, `GOOGLE_API_KEY`, and `MASTER_KEY`.
-5. **Apply**: Click "Apply" and wait for the build.
+### 1. Simple Steps
+1. **GitHub Push**: Ensure your code is on a private GitHub repo.
+2. **Sign Up**: Create an account at [Hugging Face](https://huggingface.co/join).
+3. **New Space**:
+   - Go to [huggingface.co/new-space](https://huggingface.co/new-space).
+   - **Space Name**: e.g., `outreach-agent`.
+   - **Space SDK**: Select **Docker**.
+   - **Docker Template**: Select **Blank**.
+   - **Visibility**: **Private** (Recommended for your safety).
+4. **Connect GitHub**:
+   - Go to the **Settings** tab of your new Space.
+   - Click "Connect a GitHub repository" and select this repo.
+5. **Add Secrets (Environment Variables)**:
+   - Still in **Settings**, scroll to **Variables and secrets**.
+   - Add the following as **Secrets** (not Variables):
+     - `GOOGLE_API_KEY`
+     - `TELEGRAM_BOT_TOKEN`
+     - `MASTER_KEY`
+     - `GOOGLE_CLIENT_JSON` (Paste the whole JSON string)
+6. **Port Verification**: 
+   - Ensure the `README.md` on Hugging Face (the metadata block) has `app_port: 8501`. (The Space will try to use 7860 by default).
+
+---
+
+## 🛠️ Performance & Maintenance
+Since Hugging Face's free tier is 24/7 but has limited RAM:
+- **Auto-Restart**: If the app crashes, Hugging Face will restart it automatically.
+- **Persistence**: Note that `data.db` will be reset on restarts. For permanent data, you should use the [Hugging Face Datasets](https://huggingface.co/docs/hub/datasets) or an external database like MongoDB Atlas (Free Tier available).
+
+---
+
+## Local "Always On" (Linux / PM2)
+If you prefer to keep everything on your machine:
+1. `sudo npm install pm2 -g`
+2. `pm2 start scripts/run_prod.sh --name outreach-agent`
+3. `pm2 save && pm2 startup`
+This ensures if your machine restarts, the bot and dashboard come back up automatically without any credit card.
 
 ### 2. Data Persistence
 Render's filesystem is ephemeral. To save data between restarts:
