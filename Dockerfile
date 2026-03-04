@@ -18,24 +18,21 @@ USER user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH
 
-# Set the working directory to the user's home directory
+# Create the app directory in user's home and set it as WORKDIR
+RUN mkdir -p $HOME/app
 WORKDIR $HOME/app
 
-# Copy the requirements file into the container
-# Use --chown=user:user to ensure the user has ownership
-COPY --chown=user:user requirements.txt .
-
-# Install any needed packages specified in requirements.txt
-RUN pip3 install --no-cache-dir --user -r requirements.txt
-
-# Copy the rest of the application code into the container
+# Copy everything with correct ownership
 COPY --chown=user:user . .
 
-# Make the startup script executable
+# Install dependencies as the user
+RUN pip3 install --no-cache-dir --user -r requirements.txt
+
+# Ensure the startup script is executable
 RUN chmod +x scripts/run_prod.sh
 
-# Expose the port Streamlit will run on
-EXPOSE 8501
+# Expose the default Hugging Face port 7860
+EXPOSE 7860
 
 # Command to run the application
 CMD ["./scripts/run_prod.sh"]
