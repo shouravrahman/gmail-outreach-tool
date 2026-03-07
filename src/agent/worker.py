@@ -4,15 +4,25 @@ import sys
 from src.utils.database import Session, Campaign
 from src.agent.workflow import create_workflow
 
+# Try to import checkpointer
+try:
+    from langgraph.checkpoint.memory import MemorySaver
+except ImportError:
+    MemorySaver = None
+
 def run_worker():
     print("🚀 AI Outreach Worker Started...")
-    workflow = create_workflow()
+    checkpointer = MemorySaver() if MemorySaver else None
+    workflow = create_workflow(checkpointer=checkpointer)
     
     def signal_handler(sig, frame):
         print("\n🛑 Stopping worker...")
         sys.exit(0)
     
-    signal.signal(signal.SIGINT, signal_handler)
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+    except ValueError:
+        pass  # Ignore if running in a background thread
     
     while True:
         session = Session()
@@ -36,16 +46,17 @@ def run_worker():
             try:
                 # Run the workflow
                 # The workflow will update the database (Drafts,Logs) directly
-                result = workflow.invoke(initial_state)
+                config = {"configurable": {"thread_id": str(campaign.id)}}
+                result = workflow.invoke(initial_state, config=config)
                 
                 # If the workflow finishes a cycle, we update the status based on output
                 if result.get("status") == "completed":
-                    campaign.status = "completed"
+                    campaign.status = "completed" # type: ignore
                     print(f"✅ Campaign {campaign.name} completed.")
                 
             except Exception as e:
                 print(f"❌ Error in worker for campaign {campaign.name}: {e}")
-                campaign.status = "error"
+                campaign.status = "error" # type: ignore
             
             session.commit()
             

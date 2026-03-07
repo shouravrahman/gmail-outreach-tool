@@ -1,16 +1,38 @@
 from typing import TypedDict, List, Dict, Any, Optional
-from langgraph.graph import StateGraph, END
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
-from langchain_ollama import ChatOllama
-from langchain_core.messages import HumanMessage, SystemMessage
-from src.tools.google_tools import GoogleTool
-from src.tools.resend_tools import ResendTool
-from src.utils.database import Session, Campaign, EmailLog, GoogleAccount, Draft, ResendAccount
 import json
 import time
 import random
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Try to import LangChain components (optional)
+try:
+    from langgraph.graph import StateGraph, END  # type: ignore
+    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
+    from langchain_openai import ChatOpenAI  # type: ignore
+    from langchain_ollama import ChatOllama  # type: ignore
+    from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore
+    LANGCHAIN_AVAILABLE = True
+except (ImportError, ModuleNotFoundError) as e:
+    LANGCHAIN_AVAILABLE = False
+    logger.debug(f"LangChain not available: {type(e).__name__}")
+    # Fallback classes if langchain not available
+    StateGraph = None  # type: ignore
+    ChatGoogleGenerativeAI = None  # type: ignore
+    ChatOpenAI = None  # type: ignore
+    ChatOllama = None  # type: ignore
+    class HumanMessage:
+        def __init__(self, content: str):
+            self.content = content
+    class SystemMessage:
+        def __init__(self, content: str):
+            self.content = content
+
+from src.tools.google_tools import GoogleTool
+from src.tools.resend_tools import ResendTool
+from src.utils.database import Session, Campaign, EmailLog, GoogleAccount, Draft, ResendAccount
 
 class AgentState(TypedDict):
     campaign_id: int
@@ -23,17 +45,32 @@ class AgentState(TypedDict):
     errors: List[str]
 
 def get_llm(provider="gemini"):
-    if provider == "gemini":
-        return ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=os.getenv("GOOGLE_API_KEY"))
-    elif provider == "ollama":
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        return ChatOllama(model="llama3", base_url=base_url)
-    else:
-        # Default to OpenAI logic
-        model = os.getenv("OPENAI_MODEL", "gpt-4o")
-        api_key = os.getenv("OPENAI_API_KEY")
-        base_url = os.getenv("OPENAI_BASE_URL") # For OpenRouter etc.
-        return ChatOpenAI(model=model, openai_api_key=api_key, base_url=base_url)
+    """Get LLM instance based on provider"""
+    if not LANGCHAIN_AVAILABLE:
+        logger.warning("LangChain not available - returning None")
+        return None
+    
+    try:
+        if provider == "gemini":
+            if ChatGoogleGenerativeAI is None:
+                return None
+            return ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=os.getenv("GOOGLE_API_KEY"))
+        elif provider == "ollama":
+            if ChatOllama is None:
+                return None
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            return ChatOllama(model="llama3", base_url=base_url)
+        else:
+            # Default to OpenAI
+            if ChatOpenAI is None:
+                return None
+            model = os.getenv("OPENAI_MODEL", "gpt-4o")
+            api_key = os.getenv("OPENAI_API_KEY")
+            base_url = os.getenv("OPENAI_BASE_URL")
+            return ChatOpenAI(model=model, openai_api_key=api_key, base_url=base_url)
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        return None
 
 def initialize_node(state: AgentState):
     session = Session()
@@ -45,11 +82,14 @@ def initialize_node(state: AgentState):
     # Get the correct tool for the provider
     leads = []
     try:
-        if campaign.outreach_provider == 'gmail':
+        # Convert column to string for comparison
+        provider_str = str(campaign.outreach_provider) if campaign.outreach_provider else ''
+        if provider_str == 'gmail':
             account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
-            tool = GoogleTool(account.credentials)
-            sheet_id = campaign.sheet_url.split("/d/")[1].split("/")[0]
-            leads = tool.read_sheet(sheet_id, "A:Z")
+            if account:
+                tool = GoogleTool(account.credentials)
+                sheet_id = campaign.sheet_url.split("/d/")[1].split("/")[0]
+                leads = tool.read_sheet(sheet_id, "A:Z")
         else:
             # Assume Google Sheets as lead source even for Resend
             account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
@@ -67,8 +107,19 @@ def initialize_node(state: AgentState):
 def draft_messages_node(state: AgentState):
     session = Session()
     campaign = session.query(Campaign).filter(Campaign.id == state["campaign_id"]).first()
-    llm = get_llm(campaign.provider)
-    prompt_template = campaign.prompt_template
+    
+    if not campaign:
+        session.close()
+        return {"status": "error", "errors": ["Campaign not found"]}
+    
+    # Convert column values to strings for proper typing
+    provider_str = str(campaign.provider) if campaign.provider else "gemini"
+    prompt_template = str(campaign.prompt_template) if campaign.prompt_template else ""
+    
+    llm = get_llm(provider_str)
+    if not llm:
+        session.close()
+        return {"status": "error", "errors": ["LLM not available"]}
     
     batch_size = 5 # Small batch size for top-notch rate stability
     start_idx = state.get("current_lead_index", 0)
@@ -158,52 +209,79 @@ def wait_draft_node(state: AgentState):
 
 def send_emails_node(state: AgentState):
     session = Session()
-    campaign = session.query(Campaign).filter(Campaign.id == state["campaign_id"]).first()
-    
-    draft = session.query(Draft).filter(Draft.campaign_id == campaign.id, Draft.status.in_(['approved', 'edited'])).first()
-    
-    if not draft:
-        session.close()
-        return {"status": "completed"}
-        
-    success = False
     try:
-        if campaign.outreach_provider == 'gmail':
-            account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
-            if account:
-                tool = GoogleTool(account.credentials)
-                success = tool.send_email(draft.recipient_email, draft.subject, draft.body)
-        elif campaign.outreach_provider == 'resend':
-            account = session.query(ResendAccount).filter(ResendAccount.id == campaign.outreach_account_id).first()
-            api_key = account.api_key if account else os.getenv("RESEND_API_KEY")
-            from_email = account.from_email if account else os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
-            
-            if api_key:
-                tool = ResendTool(api_key)
-                success = tool.send_email(from_email, draft.recipient_email, draft.subject, draft.body)
-    except Exception as e:
-        print(f"❌ Send error: {e}")
-        success = False
-        
-    if success:
-        log = EmailLog(
-            campaign_id=campaign.id,
-            account_id=campaign.outreach_account_id,
-            recipient=draft.recipient_email,
-            subject=draft.subject,
-            body=draft.body,
-            status="sent"
-        )
-        session.add(log)
-        draft.status = 'sent'
-    else:
-        draft.status = 'failed'
-    
-    session.commit()
-    session.close()
-    return {"status": "sending"}
+        campaign = session.query(Campaign).filter(Campaign.id == state["campaign_id"]).first()
+        if not campaign:
+            return {"status": "error", "errors": ["Campaign not found during send."]}
 
-def create_workflow():
+        # Get a batch of approved drafts to send
+        drafts_to_send = session.query(Draft).filter(
+            Draft.campaign_id == campaign.id,
+            Draft.status.in_(['approved', 'edited'])
+        ).limit(5).all() # Process up to 5 emails per worker cycle
+
+        if not drafts_to_send:
+            # Check if there are any non-sent drafts left
+            remaining_drafts = session.query(Draft).filter(Draft.campaign_id == campaign.id, Draft.status != 'sent').count()
+            if remaining_drafts == 0:
+                campaign.status = "completed" # type: ignore # Mark campaign as completed in DB
+                session.commit()
+                return {"status": "completed"}
+            else:
+                # Drafts exist but are not approved, wait for approval.
+                return {"status": "awaiting_approval"}
+
+        delay = campaign.settings.get("delay_seconds", 60)
+
+        for draft in drafts_to_send:
+            success = False
+            try:
+                provider_str = str(campaign.outreach_provider) if campaign.outreach_provider else ''
+
+                if provider_str == 'gmail':
+                    account = session.query(GoogleAccount).filter(GoogleAccount.id == campaign.outreach_account_id).first()
+                    if account:
+                        tool = GoogleTool(account.credentials)
+                        success = tool.send_email(str(draft.recipient_email), str(draft.subject or ""), str(draft.body or ""))
+                elif provider_str == 'resend':
+                    account = session.query(ResendAccount).filter(ResendAccount.id == campaign.outreach_account_id).first()
+                    if account:
+                        tool = ResendTool(account.api_key)
+                        success = tool.send_email(str(account.from_email), str(draft.recipient_email), str(draft.subject or ""), str(draft.body or ""))
+
+            except Exception as e:
+                logger.error(f"Send error for draft {draft.id}: {e}")
+                success = False
+
+            if success:
+                log = EmailLog(
+                    campaign_id=str(campaign.id),
+                    account_id=campaign.outreach_account_id,
+                    recipient=str(draft.recipient_email),
+                    subject=str(draft.subject or ""),
+                    body=str(draft.body or ""),
+                    status="sent"
+                )
+                session.add(log)
+                draft.status = "sent" # type: ignore
+            else:
+                draft.status = "failed" # type: ignore
+
+            session.commit() # Commit after each email attempt
+
+            # Wait for the configured delay before the next email
+            jitter = random.randint(-5, 5)
+            time.sleep(max(1, delay + jitter))
+
+        return {"status": "sending"}
+
+    finally:
+        session.close()
+
+def create_workflow(checkpointer=None):
+    if StateGraph is None:
+        raise RuntimeError("LangGraph is not available. Please install it with 'pip install langgraph'")
+
     workflow = StateGraph(AgentState)
     workflow.add_node("initialize", initialize_node)
     workflow.add_node("draft", draft_messages_node)
@@ -229,10 +307,13 @@ def create_workflow():
         "send",
         lambda x: x["status"],
         {
-            "sending": "wait",
-            "completed": END
+            "sending": END, # A batch was sent, worker will re-invoke.
+            "completed": END,
+            "awaiting_approval": END, # No approved drafts, stop and wait.
+            "error": END
         }
     )
-    workflow.add_edge("wait", "send")
+    # The 'wait' node is no longer needed in the sending loop as the delay
+    # is now handled within the 'send_emails_node' itself.
     
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)

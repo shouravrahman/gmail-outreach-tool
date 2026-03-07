@@ -1,8 +1,26 @@
 from typing import List, Dict, Any
+import logging
 from src.utils.database import Session, Campaign, EmailLog, Draft, GoogleAccount, ResendAccount
 from src.agent.workflow import get_llm
-from langchain_core.messages import HumanMessage, SystemMessage
 import json
+
+logger = logging.getLogger(__name__)
+
+# Try to import LangChain message classes (optional)
+try:
+    from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore
+    LANGCHAIN_AVAILABLE = True
+except (ImportError, ModuleNotFoundError) as e:
+    LANGCHAIN_AVAILABLE = False
+    logger.debug(f"LangChain not available: {type(e).__name__}")
+    # Fallback message classes if langchain not available
+    class HumanMessage:
+        def __init__(self, content: str):
+            self.content = content
+    
+    class SystemMessage:
+        def __init__(self, content: str):
+            self.content = content
 
 def get_assistant_response(query: str) -> str:
     session = Session()

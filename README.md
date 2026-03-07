@@ -1,61 +1,102 @@
----
-title: Outreach Agent
-emoji: 🚀
-colorFrom: blue
-colorTo: purple
-sdk: docker
-app_port: 7860
-pinned: false
----
+# Bulk Email Tool 📧
 
-# AI Outreach Agent 🚀
+A production-grade bulk email system with NLU, approval workflows, and security hardening. Designed for easy deployment on Streamlit Cloud.
 
-A sophisticated, Telegram-controlled AI agent for personalized email outreach. It automates lead processing from Google Sheets and sends emails via Gmail or Resend using LangGraph for stateful workflows.
+## Features
 
-## ✨ Key Features
-- **Telegram Interface**: Command your agent, connect accounts, and approve drafts from your phone.
-- **Multi-Model AI**: Support for **Gemini**, **OpenAI**, and **Ollama (Local)**.
-- **Human-in-the-Loop**: Preview and approve every AI-generated draft before it's sent.
-- **Flexible Hosting**: Run 24/7 on **Hugging Face Spaces** or locally on your own hardware.
+- 🔐 **Enterprise Security** - PBKDF2-SHA256 encryption, JWT auth, rate limiting, input validation
+- 🧠 **Natural Language** - Intent classification, entity extraction, semantic search
+- 👥 **Approval Workflows** - Campaign approvals, role-based access (Admin/Manager/User/Viewer)
+- 📊 **Beautiful Dashboard** - Streamlit UI with analytics, templates, audit logs
+- 📨 **Email Management** - Create campaigns, manage templates, track recipients
+- 🔍 **Audit Trails** - Full action logging for compliance
 
----
+## Quick Start
 
-## 🚀 Deployment Options
+**Local Development**
+```bash
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-### 1. Cloud (Hugging Face Spaces) - 0-Card Required
-Deploy 24/7 for free without a credit card.
-- See [DEPLOYMENT.md](./DEPLOYMENT.md#-recommended-hugging-face-spaces-truly-0-card) for steps.
+# Install dependencies
+pip install -r requirements.txt
 
-### 2. Local (Sovereign Hosting)
-Run 100% private using local AI and your own hardware.
-- See [DEPLOYMENT.md](./DEPLOYMENT.md#local-always-on-linux--pm2) for steps.
+# Create secrets file
+cp .env.example .env
 
----
+# Run locally
+streamlit run app.py
+```
 
-## 🛠️ Local Development Setup
+Open http://localhost:8501
 
-1. **Clone & Install**:
+## 🚀 Deploy to Streamlit Cloud
+
+This application is optimized for Streamlit Cloud's free tier. It runs the Dashboard, AI Worker, and Telegram Bot in a single process.
+
+### Setup Steps:
+1. **Prepare your database:**
+   - Create a NeonDB project at [console.neon.tech](https://console.neon.tech)
+   - Copy your PostgreSQL connection string
+   - See [NEONDB_SETUP.md](NEONDB_SETUP.md) for details
+
+2. **Push to GitHub:**
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
+   git add -A
+   git commit -m "Ready for deployment"
+   git push origin main
    ```
-2. **Configure Environment**:
-   - Copy `.env.example` to `.env`.
-   - Fill in your `MASTER_KEY`, `GOOGLE_CLIENT_JSON`, and `TELEGRAM_BOT_TOKEN`.
-3. **Run Services**:
-   - **Telegram Bot**: `python3 -m src.utils.telegram_bot`
-   - **Streamlit Dashboard**: `streamlit run src/utils/dashboard.py`
+
+3. **Deploy:**
+   - Go to [streamlit.io/cloud](https://streamlit.io/cloud)
+   - Click "New app" → Connect GitHub repo
+   - Select branch and `app.py` as main file
+   - Click "Deploy"
+
+4. **Add Secrets:**
+   - Click **Advanced settings** → **Secrets**
+   - Add these secrets (copy from `.streamlit/secrets.example.toml`):
+   ```
+   DATABASE_URL="postgresql://user:pass@host/bulk_email?sslmode=require"
+   MASTER_KEY="your-random-32-char-key"
+   ENCRYPTION_SALT="your-random-salt"
+   JWT_SECRET="your-random-jwt-secret"
+   TELEGRAM_BOT_TOKEN="optional-bot-token"
+   TELEGRAM_CHAT_ID="optional-chat-id"
+   ```
+   - Click "Save"
+
+5. **Auto-Deploy:**
+   - Your app will deploy automatically
+   - Every git push redeploys instantly
+   - Check deployment status in Streamlit Cloud dashboard
+
+### Optional: Add Error Notifications
+To get Telegram alerts for critical errors:
+- Get a bot token: [@BotFather](https://t.me/botfather)
+- Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to secrets
 
 ---
 
-## 🎮 Usage Guide
-1. **Link Gmail**: Send `/connect` in Telegram.
-2. **Start Campaign**: Send `/campaign` to set your target sheet and AI goal.
-3. **Approve Drafts**: Review AI-generated emails in Telegram or the Dashboard.
-4. **Scale**: Watch your leads turn into conversations!
+## 🎮 Usage Guide (Dashboard)
+1. **Register**: Create account in Streamlit dashboard
+2. **Create Campaign**: Add email, recipients, template
+3. **Approve**: Manager approves campaign before sending
+4. **Monitor**: View analytics and delivery status
+5. **Audit**: Check action history
+
+**NLU Commands** (Natural Language):
+- "Send emails to all @gmail.com users"
+- "Filter recipients by domain"
+- "Show campaigns from Q1"
+- "Approve marketing campaign"
 
 ---
 
 ## 🛡️ Security & Privacy
-Your leads and tokens are encrypted with AES-256 and stored in your private database.
+- All data encrypted with PBKDF2-SHA256 and Fernet encryption
+- Stored in your private SQLite/PostgreSQL database
+- 100% action logging for compliance
+- Role-based access control
+- Rate limiting to prevent abuse
