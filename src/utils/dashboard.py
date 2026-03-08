@@ -5,8 +5,12 @@ Complete UI for email campaign management with authentication, monitoring, and c
 
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+except ImportError:
+    st.error("The 'plotly' library is missing. Please ensure it is installed and listed in requirements.txt.")
+    st.stop()
 from datetime import datetime, timedelta
 import json
 import logging
